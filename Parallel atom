@@ -1,0 +1,109 @@
+Import torch
+import torch.nn as nn
+import torch.optim as optim
+import random
+import numpy as np
+from torch.utils.data import Dataset, DataLoader
+from multiprocessing import cpu_count
+
+# ===============================
+# STRUCTURE ENCODER (Feature Generator)
+# ===============================
+def encode_structure(structure):
+    """
+    Dummy encoder: Converts a structure (dict) into a 5D feature vector.
+    Replace with real descriptor if needed.
+    """
+    # Sample features: atomic number average, count, volume, etc.
+    atomic_numbers = structure['atomic_numbers']
+    num_atoms = len(atomic_numbers)
+    avg_atomic_number = np.mean(atomic_numbers)
+    std_atomic_number = np.std(atomic_numbers)
+    volume = structure['volume']
+    sum_atomic_number = np.sum(atomic_numbers)
+
+    return torch.tensor([avg_atomic_number, std_atomic_number, num_atoms, volume, sum_atomic_number], dtype=torch.float32)
+
+
+# ===============================
+# DUMMY DATASET
+# ===============================
+class StructureDataset(Dataset):
+    def __init__(self, num_samples=1000):
+        self.structures = []
+        self.targets = []
+
+        for _ in range(num_samples):
+            num_atoms = random.randint(5, 20)
+            atomic_numbers = [random.randint(1, 30) for _ in range(num_atoms)]
+            volume = random.uniform(100.0, 500.0)
+            structure = {'atomic_numbers': atomic_numbers, 'volume': volume}
+            energy = 0.1 * np.mean(atomic_numbers) + 0.001 * volume + np.random.normal(0, 0.05)
+            
+            self.structures.append(structure)
+            self.targets.append(torch.tensor([energy], dtype=torch.float32))
+
+    def __len__(self):
+        return len(self.structures)
+
+    def __getitem__(self, idx):
+        features = encode_structure(self.structures[idx])
+        target = self.targets[idx]
+        return features, target
+
+
+# ===============================
+# MLP MODEL
+# ===============================
+class MyMLPModel(nn.Module):
+    def __init__(self, input_dim=5, hidden_dim=32, output_dim=1):
+        super(MyMLPModel, self).__init__()
+        self.model = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, output_dim)
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+
+# ===============================
+# TRAINING LOOP
+# ===============================
+def train(model, dataloader, optimizer, criterion, device, epochs=50):
+    model.to(device)
+    model.train()
+    for epoch in range(epochs):
+        epoch_loss = 0.0
+        for features, target in dataloader:
+            features, target = features.to(device), target.to(device)
+            optimizer.zero_grad()
+            output = model(features)
+            loss = criterion(output, target)
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+        if (epoch + 1) % 10 == 0:
+            print(f"Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss / len(dataloader):.4f}")
+
+
+# ===============================
+# MAIN
+# ===============================
+if __name__ == '__main__':
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dataset = StructureDataset(num_samples=1000)
+    dataloader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=min(cpu_count(), 4))
+
+    model = MyMLPModel(input_dim=5)
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    criterion = nn.MSELoss()
+
+    train(model, dataloader, optimizer, criterion, device)
+
+    # Save model
+    torch.save(model.state_dict(), "mlp_model.pth")
+    print("Model saved to mlp_model.pth")
